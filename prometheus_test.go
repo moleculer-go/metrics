@@ -143,7 +143,6 @@ var _ = Describe("Prometheus", func() {
 		time.Sleep(time.Millisecond * 1000)
 
 		results := fetchResults()
-		//fmt.Println("**************** \n ", results, "\n\n\n-")
 		Expect(getValue(results, "moleculer_all_req_total")).Should(Equal("24"))
 		Expect(getValue(results, "moleculer_all_req_duration_ms_count")).Should(Equal("24"))
 		Expect(getValue(results, "moleculer_all_req_duration_ms_bucket{le=\"10\"}")).Should(Equal("24"))
