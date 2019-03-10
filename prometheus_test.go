@@ -2,15 +2,19 @@ package metrics
 
 import (
 	"bufio"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/moleculer-go/moleculer"
 
 	"github.com/moleculer-go/moleculer/broker"
+	"github.com/moleculer-go/moleculer/transit/memory"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	log "github.com/sirupsen/logrus"
 )
 
 func getValue(text, name string) string {
@@ -29,21 +33,42 @@ func getValue(text, name string) string {
 	return "not found"
 }
 
+func fetchResults() string {
+	response, err := http.Get("http://localhost:3030/metrics")
+	Expect(err).ShouldNot(HaveOccurred())
+	defer response.Body.Close()
+	bytes, err := ioutil.ReadAll(response.Body)
+	Expect(err).ShouldNot(HaveOccurred())
+	return string(bytes)
+}
+
 var _ = Describe("Prometheus", func() {
-	emptyActionHandler := func(ctx moleculer.Context, param moleculer.Payload) interface{} { return nil }
+	slowActionHandler := func(ctx moleculer.Context, param moleculer.Payload) interface{} {
+		if param.Get("sleepTime").Exists() {
+			d := time.Duration(param.Get("sleepTime").Int64())
+			time.Sleep(d * time.Nanosecond)
+		}
+		if param.Get("throwError").Exists() {
+			//panic("I shuold throwError aaaaaahhhhhhh!")
+			return errors.New("I shuold throwError aaaaaahhhhhhh!")
+		}
+		return nil
+	}
 	emptyEventHandler := func(ctx moleculer.Context, param moleculer.Payload) {}
 
-	var bkr *broker.ServiceBroker
+	logLevel := "fatal"
+	mem := &memory.SharedMemory{}
+	var bkr, bkr2 *broker.ServiceBroker
 	musicService := moleculer.Service{
 		Name: "music",
 		Actions: []moleculer.Action{
 			moleculer.Action{
 				Name:    "start",
-				Handler: emptyActionHandler,
+				Handler: slowActionHandler,
 			},
 			moleculer.Action{
 				Name:    "end",
-				Handler: emptyActionHandler,
+				Handler: slowActionHandler,
 			},
 		},
 		Events: []moleculer.Event{
@@ -59,41 +84,81 @@ var _ = Describe("Prometheus", func() {
 	}
 	BeforeSuite(func() {
 		bkr = broker.FromConfig(&moleculer.BrokerConfig{
-			LogLevel: "debug",
+			Metrics:        true,
+			LogLevel:       logLevel,
+			DiscoverNodeID: func() string { return "Prometheus_Broker" },
+			TransporterFactory: func() interface{} {
+				transport := memory.Create(log.WithField("transport", "memory"), mem)
+				return &transport
+			},
 		})
 		bkr.AddService(PrometheusService())
 		bkr.Start()
+		time.Sleep(500 * time.Millisecond)
 	})
 	AfterSuite(func() {
 		bkr.Stop()
 	})
 
 	It("Should have created metrics and started the webserver on default port 3030", func() {
-		response, err := http.Get("http://localhost:3030/metrics")
-		Expect(err).ShouldNot(HaveOccurred())
-		defer response.Body.Close()
-		bytes, err := ioutil.ReadAll(response.Body)
-		Expect(err).ShouldNot(HaveOccurred())
-		results := string(bytes)
+		results := fetchResults()
 		Expect(getValue(results, "moleculer_actions_total")).Should(Equal("0"))
-		Expect(getValue(results, "moleculer_events_total")).Should(Equal("0"))
-		Expect(getValue(results, "moleculer_nodes_total")).Should(Equal("0"))
-		Expect(getValue(results, "moleculer_services_total")).Should(Equal("0"))
+		Expect(getValue(results, "moleculer_events_total")).Should(Equal("1"))
+		Expect(getValue(results, "moleculer_nodes_total")).Should(Equal("1"))
+		Expect(getValue(results, "moleculer_services_total")).Should(Equal("1"))
 	})
 
 	It("Should have updated the metrics after a new services was added", func() {
+		bkr2 = broker.FromConfig(&moleculer.BrokerConfig{
+			Metrics:        true,
+			LogLevel:       logLevel,
+			DiscoverNodeID: func() string { return "Client_Broker_1" },
+			TransporterFactory: func() interface{} {
+				transport := memory.Create(log.WithField("transport", "memory"), mem)
+				return &transport
+			},
+		})
+		bkr2.AddService(musicService)
+		bkr2.Start()
+		time.Sleep(200 * time.Millisecond)
 
-		bkr.AddService(musicService)
-
-		response, err := http.Get("http://localhost:3030/metrics")
-		Expect(err).ShouldNot(HaveOccurred())
-		defer response.Body.Close()
-		bytes, err := ioutil.ReadAll(response.Body)
-		Expect(err).ShouldNot(HaveOccurred())
-		results := string(bytes)
+		results := fetchResults()
 		Expect(getValue(results, "moleculer_actions_total")).Should(Equal("2"))
-		Expect(getValue(results, "moleculer_events_total")).Should(Equal("2"))
-		Expect(getValue(results, "moleculer_nodes_total")).Should(Equal("0"))
+		Expect(getValue(results, "moleculer_events_total")).Should(Equal("3"))
+		Expect(getValue(results, "moleculer_nodes_total")).Should(Equal("2"))
+		Expect(getValue(results, "moleculer_services_total")).Should(Equal("2"))
+	})
+
+	It("Should have updated the metrics after slow actions are called", func() {
+		bkr.Call("music.start", map[string]int{"sleepTime": 2})
+		bkr.Call("music.end", map[string]int{"sleepTime": 1})
+		bkr.Call("music.start", map[string]int{"sleepTime": 3})
+		bkr.Call("music.end", map[string]int{"sleepTime": 4})
+		bkr.Call("music.start", map[string]int{"sleepTime": 5})
+		bkr.Call("music.end", map[string]int{"sleepTime": 6})
+
+		bkr.Call("music.start", map[string]bool{"throwError": true})
+		bkr.Call("music.end", map[string]bool{"throwError": true})
+
+		time.Sleep(time.Millisecond * 1000)
+
+		results := fetchResults()
+		//fmt.Println("**************** \n ", results, "\n\n\n-")
+		Expect(getValue(results, "moleculer_all_req_total")).Should(Equal("24"))
+		Expect(getValue(results, "moleculer_all_req_duration_ms_count")).Should(Equal("24"))
+		Expect(getValue(results, "moleculer_all_req_duration_ms_bucket{le=\"10\"}")).Should(Equal("24"))
+		Expect(getValue(results, "moleculer_all_req_duration_ms_bucket{le=\"100\"}")).Should(Equal("24"))
+		Expect(getValue(results, "moleculer_all_req_errors_total")).Should(Equal("2"))
+	})
+
+	It("Should have updated the metrics after a new services was removed", func() {
+		bkr2.Stop()
+		time.Sleep(200 * time.Millisecond)
+
+		results := fetchResults()
+		Expect(getValue(results, "moleculer_actions_total")).Should(Equal("0"))
+		Expect(getValue(results, "moleculer_events_total")).Should(Equal("1"))
+		Expect(getValue(results, "moleculer_nodes_total")).Should(Equal("1"))
 		Expect(getValue(results, "moleculer_services_total")).Should(Equal("1"))
 	})
 })
