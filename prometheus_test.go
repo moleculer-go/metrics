@@ -59,7 +59,7 @@ var _ = Describe("Prometheus", func() {
 	logLevel := "fatal"
 	mem := &memory.SharedMemory{}
 	var bkr, bkr2 *broker.ServiceBroker
-	musicService := moleculer.Service{
+	musicService := moleculer.ServiceSchema{
 		Name: "music",
 		Actions: []moleculer.Action{
 			moleculer.Action{
@@ -83,7 +83,7 @@ var _ = Describe("Prometheus", func() {
 		},
 	}
 	BeforeSuite(func() {
-		bkr = broker.FromConfig(&moleculer.BrokerConfig{
+		bkr = broker.New(&moleculer.Config{
 			Metrics:        true,
 			LogLevel:       logLevel,
 			DiscoverNodeID: func() string { return "Prometheus_Broker" },
@@ -92,7 +92,7 @@ var _ = Describe("Prometheus", func() {
 				return &transport
 			},
 		})
-		bkr.AddService(PrometheusService())
+		bkr.Publish(PrometheusService())
 		bkr.Start()
 		time.Sleep(500 * time.Millisecond)
 	})
@@ -109,7 +109,7 @@ var _ = Describe("Prometheus", func() {
 	})
 
 	It("Should have updated the metrics after a new services was added", func() {
-		bkr2 = broker.FromConfig(&moleculer.BrokerConfig{
+		bkr2 = broker.New(&moleculer.Config{
 			Metrics:        true,
 			LogLevel:       logLevel,
 			DiscoverNodeID: func() string { return "Client_Broker_1" },
@@ -118,7 +118,7 @@ var _ = Describe("Prometheus", func() {
 				return &transport
 			},
 		})
-		bkr2.AddService(musicService)
+		bkr2.Publish(musicService)
 		bkr2.Start()
 		time.Sleep(200 * time.Millisecond)
 
@@ -143,7 +143,6 @@ var _ = Describe("Prometheus", func() {
 		time.Sleep(time.Millisecond * 1000)
 
 		results := fetchResults()
-		//fmt.Println("**************** \n ", results, "\n\n\n-")
 		Expect(getValue(results, "moleculer_all_req_total")).Should(Equal("24"))
 		Expect(getValue(results, "moleculer_all_req_duration_ms_count")).Should(Equal("24"))
 		Expect(getValue(results, "moleculer_all_req_duration_ms_bucket{le=\"10\"}")).Should(Equal("24"))

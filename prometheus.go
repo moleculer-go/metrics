@@ -31,7 +31,7 @@ import (
 //  * 		docker-compose up -d
 //  *
 //  * Grafana dashboard: http://<docker-ip>:3000
-func PrometheusService() moleculer.Service {
+func PrometheusService() moleculer.ServiceSchema {
 
 	collectors := make(map[string]prometheus.Collector)
 	metricsCreatedChan := make(chan bool)
@@ -159,7 +159,7 @@ func PrometheusService() moleculer.Service {
 
 		nodesCollector := collectors["moleculer_nodes"].(*prometheus.GaugeVec)
 		for _, item := range nodes {
-			node := payload.Create(item)
+			node := payload.New(item)
 			var value float64
 			if node.Get("available").Bool() {
 				value = 1
@@ -217,7 +217,7 @@ func PrometheusService() moleculer.Service {
 
 	}
 
-	return moleculer.Service{
+	return moleculer.ServiceSchema{
 		Name: "prometheus",
 		Settings: map[string]interface{}{
 			"port":                  3030,
@@ -314,14 +314,14 @@ func PrometheusService() moleculer.Service {
 				Handler: traceSpanFinished,
 			},
 		},
-		Started: func(service moleculer.Service, logger *log.Entry) {
-			createMetrics(service.Settings, logger)
+		Started: func(context moleculer.BrokerContext, service moleculer.ServiceSchema) {
+			createMetrics(service.Settings, context.Logger())
 
 			port := fmt.Sprint(":", service.Settings["port"])
-			logger.Debug("Prometheus collector service started! port: ", port)
+			context.Logger().Debug("Prometheus collector service started! port: ", port)
 			endpoint := service.Settings["endpoint"].(string)
 			http.Handle(endpoint, promhttp.Handler())
-			logger.Fatal(http.ListenAndServe(port, nil))
+			context.Logger().Fatal(http.ListenAndServe(port, nil))
 		},
 	}
 }
