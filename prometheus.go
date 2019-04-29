@@ -31,7 +31,7 @@ import (
 //  * 		docker-compose up -d
 //  *
 //  * Grafana dashboard: http://<docker-ip>:3000
-func PrometheusService() moleculer.Service {
+func PrometheusService() moleculer.ServiceSchema {
 
 	collectors := make(map[string]prometheus.Collector)
 	metricsCreatedChan := make(chan bool)
@@ -159,7 +159,7 @@ func PrometheusService() moleculer.Service {
 
 		nodesCollector := collectors["moleculer_nodes"].(*prometheus.GaugeVec)
 		for _, item := range nodes {
-			node := payload.Create(item)
+			node := payload.New(item)
 			var value float64
 			if node.Get("available").Bool() {
 				value = 1
@@ -217,7 +217,7 @@ func PrometheusService() moleculer.Service {
 
 	}
 
-	return moleculer.Service{
+	return moleculer.ServiceSchema{
 		Name: "prometheus",
 		Settings: map[string]interface{}{
 			"port":                  3030,
