@@ -1,2 +1,2 @@
-# moleculer-metrics
+# metrics
 moleculer-metrics plugins
