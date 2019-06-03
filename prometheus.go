@@ -314,14 +314,17 @@ func PrometheusService() moleculer.ServiceSchema {
 				Handler: traceSpanFinished,
 			},
 		},
-		Started: func(service moleculer.Service, logger *log.Entry) {
-			createMetrics(service.Settings, logger)
+		Started: func(c moleculer.BrokerContext, svc moleculer.ServiceSchema) {
+			createMetrics(svc.Settings, c.Logger())
 
-			port := fmt.Sprint(":", service.Settings["port"])
-			logger.Debug("Prometheus collector service started! port: ", port)
-			endpoint := service.Settings["endpoint"].(string)
+			port := fmt.Sprint(":", svc.Settings["port"])
+			c.Logger().Debug("Prometheus collector service started! port: ", port)
+			endpoint := svc.Settings["endpoint"].(string)
 			http.Handle(endpoint, promhttp.Handler())
-			logger.Fatal(http.ListenAndServe(port, nil))
+			err := http.ListenAndServe(port, nil)
+			if err != nil {
+				c.Logger().Fatal(err)
+			}
 		},
 	}
 }
